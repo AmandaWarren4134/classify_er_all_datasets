@@ -1,0 +1,29 @@
+# config.yaml
+
+output_folder: "../outputs"
+data_folder: "../data"
+scripts_dir: "."
+adjust_script: "../adjust/adjust.R"
+
+adjuster: ["gmm", "min_mean", "mnn", "combat", "log_transformed"]
+dataset_ids:
+  - "gse19615"
+  - "gse20194"
+  - "gse20271"
+  - "gse23720"
+  - "gse25055"
+  - "gse25065"
+  - "gse31448"
+  - "gse45255"
+  - "gse58644"
+  - "gse62944_tumor"
+  - "gse76275"
+  - "gse81538"
+  - "gse96058_hiseq"
+  - "gse96058_nextseq"
+  - "metabric"
+
+bootstrap_total: 100
+bootstrap_per_job: 10
+n_hvg: 1000
+k_folds: 3

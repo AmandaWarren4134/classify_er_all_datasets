@@ -1,0 +1,171 @@
+from pathlib import Path
+
+# Get the directory where this Snakefile is located
+BASE = Path(workflow.basedir)
+configfile: str(BASE / "config" / "config.yaml")
+
+DATA_DIR = config['data_directory']
+RAW_DOWNLOAD_DIR = DATA_DIR + "/raw_download"
+RAW_DIR = DATA_DIR + "/raw_data"
+GOLD_DIR = DATA_DIR + "/gold"
+COMBINED_DIR = DATA_DIR + "/all_combined"
+EXPLORE_DIR = DATA_DIR + "/metadata_exploration"
+PARQUET_FILE = COMBINED_DIR + "/all_combined.parquet"
+META_COLUMNS_FILE = EXPLORE_DIR + "/meta_columns.txt"
+
+OSF_DATASETS = config["osf_datasets"]
+GDRIVE_DATASETS = config["gdrive_datasets"]
+ALL_DATASETS = OSF_DATASETS + GDRIVE_DATASETS
+
+
+wildcard_constraints:
+    col = r"[^/]+"   # column names must not contain /
+
+
+def get_explore_targets(wildcards):
+    """Read the column list emitted by the checkpoint and return per-column flag files."""
+    cols_file = checkpoints.csv_to_parquet.get(**wildcards).output.columns
+    cols = Path(cols_file).read_text().strip().split("\n")
+    return expand(EXPLORE_DIR + "/{col}/done.flag", col=cols)
+
+
+rule all:
+    input: # FINAL files of prepdata
+        f"{COMBINED_DIR}/all_combined.csv",
+        get_explore_targets
+
+checkpoint csv_to_parquet:
+    input:
+        csv=f"{COMBINED_DIR}/all_combined.csv",
+        script=str(BASE / "csv_to_parquet.py")
+    output:
+        parquet=PARQUET_FILE,
+        columns=META_COLUMNS_FILE
+    resources:
+        mem_mb=16000,
+        runtime=15
+    log:
+        "logs/csv_to_parquet.log"
+    shell:
+        """
+        python {input.script} \
+            --input {input.csv} \
+            --output {output.parquet} \
+            --columns-file {output.columns} \
+            > {log} 2>&1
+        """
+
+rule explore_metadata_col:
+    input:
+        data=PARQUET_FILE,
+        script=str(BASE / "explore_metadata.py")
+    output:
+        touch(EXPLORE_DIR + "/{col}/done.flag")
+    resources:
+        mem_mb=16000,
+        runtime=30
+    threads: 1
+    log:
+        "logs/explore_metadata_{col}.log"
+    shell:
+        """
+        python {input.script} \
+            --input {input.data} \
+            --output-dir {EXPLORE_DIR} \
+            --top-n 6 \
+            --column {wildcards.col} \
+            > {log} 2>&1
+        """
+
+rule combine:
+    input: 
+        expand(
+            GOLD_DIR + "/{gse}/unadjusted.csv",
+            gse=[g.lower() for g in OSF_DATASETS] # Changed here to only look for OSF datasets, can be configured to all
+        )
+    output:
+        f"{COMBINED_DIR}/all_combined.csv"
+    resources: 
+        mem_mb=16000,
+        runtime=30
+    threads: 1
+    log: 
+        "logs/combine.log"
+    shell:
+        """
+        python combine_all.py --input-dir {GOLD_DIR} --output-file {output} > {log} 2>&1
+        """
+
+rule convert_raw_to_gold:
+    input:
+        raw_dir = lambda wildcards: f"{RAW_DIR}/{wildcards.gse}",
+        organized = RAW_DIR
+    output:
+        GOLD_DIR + "/{gse}/unadjusted.csv"
+    resources:
+        runtime=30,
+        mem_mb=16000
+    log:
+        "logs/convert_{gse}.log"
+    shell:
+        """
+        python convert_raw_files.py \
+            --raw-dir {input} \
+            --target-dir {GOLD_DIR} \
+            --dataset {wildcards.gse} \
+            > {log} 2>&1
+        """
+
+rule organize:
+    input:
+        RAW_DOWNLOAD_DIR
+    output:
+        directory(RAW_DIR)
+    log: 
+        "logs/organize.log"
+    shell:
+        """
+        python organize_downloaded_files.py \
+            --raw-dir {input} \
+            --target-dir {output} \
+            > {log} 2>&1
+        """
+
+# rule download_gdrive:
+#     output:
+#         directory(RAW_DOWNLOAD_DIR)
+#     log: 
+#         "logs/download_gdrive.log"
+#     shell:
+#         """
+#         python download_datasets.py \
+#             --source gdrive \
+#             --folder-id 1smhpktMRyP4yyFHKHSisxRd9jwb8kvrq \
+#             --raw-download-dir {output} \
+#             --raw-data-dir {RAW_DIR} \
+#             --verbose \
+#             --datasets {','.join(GDRIVE_DATASETS)} \
+#             > {log} 2>&1
+#         """
+
+rule download_osf:
+    output:
+        directory(RAW_DOWNLOAD_DIR)
+    log: 
+        "logs/download_osf.log"
+    params:
+        datasets=",".join(OSF_DATASETS)
+    resources:
+        slurm_partition="login",
+        slurm_extra="login"
+    shell:
+        """
+        python download_datasets.py \
+            --source osf \
+            --project-id eky3p \
+            --raw-download-dir {output} \
+            --raw-data-dir {RAW_DIR} \
+            --verbose \
+            --datasets {params.datasets} \
+            > {log} 2>&1
+        """
