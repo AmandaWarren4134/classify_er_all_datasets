@@ -277,28 +277,6 @@ process_subset <- function(subset_path, adjuster, subset_index, test_source, out
   df <- load_subset(subset_path)
   cat("Loaded subset:", nrow(df), "rows x", ncol(df), "cols\n")
 
-  cat("=== NA DIAGNOSTICS ===\n")
-
-  # 1. Any NA anywhere
-  total_na <- sum(is.na(df))
-  cat("Total NA values in dataset:", total_na, "\n")
-
-  # 2. NA in meta_er_status
-  if ("meta_er_status" %in% colnames(df)) {
-    na_er <- sum(is.na(df$meta_er_status))
-    cat("NA in meta_er_status:", na_er, "\n")
-    
-    cat("Unique values in meta_er_status:\n")
-    print(unique(df$meta_er_status))
-  } else {
-    cat("meta_er_status column is MISSING\n")
-  }
-
-  # 3. NA in numeric data
-  num_cols <- df %>% select(where(is.numeric), -starts_with("meta_"))
-  na_numeric <- sum(is.na(num_cols))
-  cat("NA in numeric expression data:", na_numeric, "\n")
-
   out_dir <- file.path(output_dir, adjuster)
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
